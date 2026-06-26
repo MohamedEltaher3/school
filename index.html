@@ -2044,14 +2044,14 @@ function printTotalReport() {
             </tr>`;
     });
 
-    document.getElementById('printContainer').innerHTML = `
+    const el = document.getElementById('printContainer');
+    el.innerHTML = `
         <div style="font-family:'Times New Roman',serif;direction:rtl;padding:30px;color:#111;line-height:2;">
             <div style="text-align:center;border-bottom:3px double #0f172a;padding-bottom:14px;margin-bottom:20px;">
-                <div style="font-size:11px;color:#555;">جمهورية مصر العربية<br>وزارة التربية والتعليم </div>
+                <div style="font-size:11px;color:#555;">جمهورية مصر العربية<br>وزارة التربية والتعليم</div>
                 <h2 style="font-size:18px;font-weight:900;margin-top:8px;">تقرير إجمالي الحضور والغياب اليومي</h2>
                 <div style="font-size:11px;color:#777;margin-top:6px;">التاريخ: ${formatDateArabic(TODAY)}</div>
             </div>
-
             <table style="width:100%;border-collapse:collapse;font-size:14px;text-align:center;">
                 <thead>
                     <tr style="background:#f1f5f9;">
@@ -2071,7 +2071,6 @@ function printTotalReport() {
                     </tr>
                 </tbody>
             </table>
-
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-top:40px;border-top:1px solid #ccc;padding-top:20px;text-align:center;">
                 <div>
                     <div style="font-weight:700;margin-bottom:40px;font-size:12px;">سجل شئون الطلاب</div>
@@ -2091,8 +2090,18 @@ function printTotalReport() {
             </div>
         </div>
     `;
-    window.print();
-    document.getElementById('printContainer').innerHTML = '';
+
+    if (/Mobi|Android/i.test(navigator.userAgent)) {
+        html2pdf().set({
+            margin: 10,
+            filename: 'تقرير_اجمالي.pdf',
+            html2canvas: { scale: 2, useCORS: true },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        }).from(el).save().then(() => { el.innerHTML = ''; });
+    } else {
+        window.print();
+        el.innerHTML = '';
+    }
 }
         function openDailyReportModal() {
             document.getElementById('reportDateInput').value = reportDate;

@@ -2000,11 +2000,20 @@
             openModal('violationModal');
         }
 
-  function doPrint() {
-    document.getElementById('printContainer').innerHTML = 
-        document.getElementById('violationContent').innerHTML;
-    window.print();
-    document.getElementById('printContainer').innerHTML = '';
+function doPrint() {
+    const el = document.getElementById('violationContent');
+    if (/Mobi|Android/i.test(navigator.userAgent)) {
+        html2pdf().set({
+            margin: 10,
+            filename: 'محضر_غياب.pdf',
+            html2canvas: { scale: 2, useCORS: true },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        }).from(el).save();
+    } else {
+        document.getElementById('printContainer').innerHTML = el.innerHTML;
+        window.print();
+        document.getElementById('printContainer').innerHTML = '';
+    }
 }
         // ─── DAILY REPORT FUNCTIONS ──────────────────────────────────────────────────
         let reportGrade = 'g1';
@@ -2221,11 +2230,20 @@ function printTotalReport() {
             `;
         }
 
-    function printDailyReport() {
-    document.getElementById('printContainer').innerHTML = 
-        document.getElementById('dailyReportContent').innerHTML;
-    window.print();
-    document.getElementById('printContainer').innerHTML = '';
+  function printDailyReport() {
+    const el = document.getElementById('dailyReportContent');
+    if (/Mobi|Android/i.test(navigator.userAgent)) {
+        html2pdf().set({
+            margin: 10,
+            filename: 'تقرير_غياب_يومي.pdf',
+            html2canvas: { scale: 2, useCORS: true },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        }).from(el).save();
+    } else {
+        document.getElementById('printContainer').innerHTML = el.innerHTML;
+        window.print();
+        document.getElementById('printContainer').innerHTML = '';
+    }
 }
 
         // ─── INITIALIZATION ──────────────────────────────────────────────────────────

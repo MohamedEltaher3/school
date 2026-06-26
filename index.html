@@ -2240,18 +2240,23 @@ function printTotalReport() {
             `;
         }
 
-  function printDailyReport() {
-    const el = document.getElementById('dailyReportContent');
-        el.style.direction = 'rtl';
+function printDailyReport() {
+    const content = document.getElementById('dailyReportContent').innerHTML;
     if (/Mobi|Android/i.test(navigator.userAgent)) {
+        const wrapper = document.createElement('div');
+        wrapper.style.cssText = 'direction:rtl;font-family:Cairo,sans-serif;padding:20px;';
+        wrapper.innerHTML = content;
+        document.body.appendChild(wrapper);
         html2pdf().set({
             margin: 10,
             filename: 'تقرير_غياب_يومي.pdf',
-            html2canvas: { scale: 2, useCORS: true },
+            html2canvas: { scale: 2, useCORS: true, allowTaint: true },
             jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-        }).from(el).save();
+        }).from(wrapper).save().then(() => {
+            document.body.removeChild(wrapper);
+        });
     } else {
-        document.getElementById('printContainer').innerHTML = el.innerHTML;
+        document.getElementById('printContainer').innerHTML = content;
         window.print();
         document.getElementById('printContainer').innerHTML = '';
     }

@@ -2244,7 +2244,7 @@ function printDailyReport() {
     const content = document.getElementById('dailyReportContent').innerHTML;
     if (/Mobi|Android/i.test(navigator.userAgent)) {
         const wrapper = document.createElement('div');
-        wrapper.style.cssText = 'direction:rtl;font-family:Cairo,sans-serif;padding:20px;';
+      wrapper.style.cssText = 'direction:rtl;font-family:Cairo,sans-serif;padding:20px;text-align:right;unicode-bidi:embed;';
         wrapper.innerHTML = content;
         document.body.appendChild(wrapper);
         html2pdf().set({

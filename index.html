@@ -2242,6 +2242,7 @@ function printTotalReport() {
 
   function printDailyReport() {
     const el = document.getElementById('dailyReportContent');
+        el.style.direction = 'rtl';
     if (/Mobi|Android/i.test(navigator.userAgent)) {
         html2pdf().set({
             margin: 10,

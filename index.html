@@ -970,30 +970,30 @@
         }
         
         /* PRINT STYLES */
-        @media print {
-            body * {
-                visibility: hidden !important;
-            }
-            body.print-report #dailyReportContent,
-            body.print-report #dailyReportContent * {
-                visibility: visible !important;
-            }
-            body.print-violation #violationContent,
-            body.print-violation #violationContent * {
-                visibility: visible !important;
-            }
-            .print-area-active {
-                position: fixed !important;
-                top: 0;
-                right: 0;
-                width: 100%;
-                padding: 0;
-                border: none !important;
-                box-shadow: none !important;
-                visibility: visible !important;
-            }
-        }
-        
+  @media print {
+    body > *:not(#printContainer) { display: none !important; }
+    #printContainer { 
+        display: block !important;
+        direction: rtl;
+        font-family: 'Times New Roman', serif;
+        padding: 30px;
+        color: #111;
+        line-height: 2;
+    }
+    #printContainer .vdoc-header { text-align: center; border-bottom: 3px double #0f172a; padding-bottom: 14px; margin-bottom: 20px; }
+    #printContainer .vdoc-header h2 { font-size: 18px; font-weight: 900; }
+    #printContainer .vdoc-section h3 { font-size: 13px; font-weight: 800; background: #f1f5f9; padding: 5px 10px; border-right: 4px solid #0f172a; margin-bottom: 8px; }
+    #printContainer .vdoc-row { display: flex; gap: 8px; margin-bottom: 6px; font-size: 13px; }
+    #printContainer .vdoc-label { font-weight: 700; min-width: 160px; }
+    #printContainer .vdoc-value { flex: 1; border-bottom: 1px dashed #999; }
+    #printContainer .vdoc-body-text { font-size: 13px; line-height: 2.1; text-align: justify; padding: 10px; background: #fafafa; border: 1px solid #e2e8f0; margin-bottom: 14px; }
+    #printContainer .vdoc-signatures { display: grid !important; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-top: 24px; border-top: 1px solid #ccc; padding-top: 18px; text-align: center; }
+    #printContainer .sig-title { font-weight: 700; margin-bottom: 40px; font-size: 12px; }
+    #printContainer .sig-line { border-bottom: 1px solid #555; width: 80%; margin: 0 auto 4px; }
+    #printContainer table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    #printContainer td, #printContainer th { padding: 8px; border: 1px solid #cbd5e1; }
+    #printContainer th { background: #f1f5f9; font-weight: 800; }
+}      
         /* TABLET MEDIA QUERY */
         @media (max-width: 900px) {
             .students-header,
@@ -1277,7 +1277,7 @@
 </head>
 
 <body>
-
+<div id="printContainer"></div>
     <!-- LOADING -->
     <div class="loading-overlay" id="loadingOverlay">
         <div class="spinner"></div>
@@ -1318,6 +1318,7 @@
             </div>
             <button class="btn-mark-all-present" id="btnMarkAll" onclick="markAllPresent()">✅ تسجيل حضور الكل</button>
             <button class="btn-mark-all-present" id="btnDailyReport" style="background:var(--primary);box-shadow:0 4px 6px -1px rgba(15, 23, 42, 0.2);" onclick="openDailyReportModal()">📊 تقرير الغياب اليومي</button>
+            <button class="btn-mark-all-present" id="btnTotalReport" style="background:#7c3aed;box-shadow:0 4px 6px -1px rgba(124,58,237,0.2);" onclick="printTotalReport()">📋 تقرير إجمالي الكل</button>
         </div>
         <div class="summary-cards">
             <div class="summary-card">
@@ -1948,7 +1949,7 @@
 
             container.innerHTML = `
                 <div class="vdoc-header">
-                    <div class="ministry">جمهورية مصر العربية<br>وزارة التربية والتعليم والتعليم الفني<br>إدارة شئون الطلاب والامتحانات</div>
+                    <div class="ministry">جمهورية مصر العربية<br>وزارة التربية <br>إدارة شئون الطلاب والامتحانات</div>
                     <h2>محضر إخطار غياب طالب (${warningName})</h2>
                     <div class="doc-num">تاريخ الإخطار: ${formatDateArabic(TODAY)}</div>
                 </div>
@@ -1999,20 +2000,90 @@
             openModal('violationModal');
         }
 
-        function doPrint() {
-            document.body.classList.add('print-violation');
-            document.getElementById('violationContent').classList.add('print-area-active');
-            window.print();
-            setTimeout(() => {
-                document.body.classList.remove('print-violation');
-                document.getElementById('violationContent').classList.remove('print-area-active');
-            }, 1000);
-        }
-
+  function doPrint() {
+    document.getElementById('printContainer').innerHTML = 
+        document.getElementById('violationContent').innerHTML;
+    window.print();
+    document.getElementById('printContainer').innerHTML = '';
+}
         // ─── DAILY REPORT FUNCTIONS ──────────────────────────────────────────────────
         let reportGrade = 'g1';
         let reportDate = TODAY;
+function printTotalReport() {
+    let rows = '';
+    let grandTotal = 0, grandPresent = 0, grandAbsent = 0;
 
+    GRADES.forEach(g => {
+        let gradeTotal = 0, gradeAbsent = 0;
+        for (let c = 0; c < CLASSES_PER_GRADE; c++) {
+            const cls = state[g.id]?.[c] || [];
+            gradeTotal += cls.length;
+            gradeAbsent += cls.filter(st => st.absences.includes(TODAY)).length;
+        }
+        const gradePresent = gradeTotal - gradeAbsent;
+        grandTotal += gradeTotal;
+        grandPresent += gradePresent;
+        grandAbsent += gradeAbsent;
+
+        rows += `
+            <tr>
+                <td>${g.label}</td>
+                <td>${gradeTotal}</td>
+                <td style="color:green;font-weight:700;">${gradePresent}</td>
+                <td style="color:red;font-weight:700;">${gradeAbsent}</td>
+            </tr>`;
+    });
+
+    document.getElementById('printContainer').innerHTML = `
+        <div style="font-family:'Times New Roman',serif;direction:rtl;padding:30px;color:#111;line-height:2;">
+            <div style="text-align:center;border-bottom:3px double #0f172a;padding-bottom:14px;margin-bottom:20px;">
+                <div style="font-size:11px;color:#555;">جمهورية مصر العربية<br>وزارة التربية والتعليم </div>
+                <h2 style="font-size:18px;font-weight:900;margin-top:8px;">تقرير إجمالي الحضور والغياب اليومي</h2>
+                <div style="font-size:11px;color:#777;margin-top:6px;">التاريخ: ${formatDateArabic(TODAY)}</div>
+            </div>
+
+            <table style="width:100%;border-collapse:collapse;font-size:14px;text-align:center;">
+                <thead>
+                    <tr style="background:#f1f5f9;">
+                        <th style="padding:10px;border:2px solid #0f172a;width:35%;">الصف</th>
+                        <th style="padding:10px;border:2px solid #0f172a;">مقيد</th>
+                        <th style="padding:10px;border:2px solid #0f172a;">حاضر</th>
+                        <th style="padding:10px;border:2px solid #0f172a;">غائب</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${rows}
+                    <tr style="background:#f1f5f9;font-weight:900;font-size:15px;">
+                        <td style="padding:10px;border:2px solid #0f172a;">الجملة</td>
+                        <td style="padding:10px;border:2px solid #0f172a;">${grandTotal}</td>
+                        <td style="padding:10px;border:2px solid #0f172a;color:green;">${grandPresent}</td>
+                        <td style="padding:10px;border:2px solid #0f172a;color:red;">${grandAbsent}</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-top:40px;border-top:1px solid #ccc;padding-top:20px;text-align:center;">
+                <div>
+                    <div style="font-weight:700;margin-bottom:40px;font-size:12px;">سجل شئون الطلاب</div>
+                    <div style="border-bottom:1px solid #555;width:80%;margin:0 auto 4px;"></div>
+                    <div style="font-size:11px;color:#666;">التوقيع: .....................</div>
+                </div>
+                <div>
+                    <div style="font-weight:700;margin-bottom:40px;font-size:12px;">الأخصائي الاجتماعي</div>
+                    <div style="border-bottom:1px solid #555;width:80%;margin:0 auto 4px;"></div>
+                    <div style="font-size:11px;color:#666;">التوقيع: .....................</div>
+                </div>
+                <div>
+                    <div style="font-weight:700;margin-bottom:40px;font-size:12px;">يعتمد، مدير المدرسة</div>
+                    <div style="border-bottom:1px solid #555;width:80%;margin:0 auto 4px;"></div>
+                    <div style="font-size:11px;color:#666;">التوقيع والختم: .....................</div>
+                </div>
+            </div>
+        </div>
+    `;
+    window.print();
+    document.getElementById('printContainer').innerHTML = '';
+}
         function openDailyReportModal() {
             document.getElementById('reportDateInput').value = reportDate;
             selectReportGrade(activeGrade);
@@ -2081,7 +2152,7 @@
             container.innerHTML = `
                 <div class="violation-doc" style="border:1px solid #cbd5e1;border-radius:12px;padding:32px;background:white;box-shadow:none;">
                     <div class="vdoc-header" style="margin-bottom:20px;border-bottom:3px double var(--primary);padding-bottom:12px;">
-                        <div class="ministry" style="font-size:11px;color:#475569;margin-bottom:4px;">جمهورية مصر العربية<br>وزارة التربية والتعليم والتعليم الفني<br>إدارة شئون الطلاب والامتحانات</div>
+                        <div class="ministry" style="font-size:11px;color:#475569;margin-bottom:4px;">جمهورية مصر العربية<br>وزارة التربية والتعليم<br>إدارة شئون الطلاب والامتحانات</div>
                         <h2 style="font-size:18px;font-weight:800;color:var(--primary);margin-top:6px;">تقرير إحصاء غياب وحضور الطلاب اليومي</h2>
                         <div class="doc-num" style="font-size:11px;color:#64748b;margin-top:6px;">
                             المرحلة الدراسية: <strong>${gradeLabel}</strong> &nbsp;|&nbsp; 
@@ -2150,15 +2221,12 @@
             `;
         }
 
-        function printDailyReport() {
-            document.body.classList.add('print-report');
-            document.getElementById('dailyReportContent').classList.add('print-area-active');
-            window.print();
-            setTimeout(() => {
-                document.body.classList.remove('print-report');
-                document.getElementById('dailyReportContent').classList.remove('print-area-active');
-            }, 1000);
-        }
+    function printDailyReport() {
+    document.getElementById('printContainer').innerHTML = 
+        document.getElementById('dailyReportContent').innerHTML;
+    window.print();
+    document.getElementById('printContainer').innerHTML = '';
+}
 
         // ─── INITIALIZATION ──────────────────────────────────────────────────────────
         async function init() {
@@ -2188,6 +2256,9 @@
 </body>
 
 </html>
+
+
+
 
 
 

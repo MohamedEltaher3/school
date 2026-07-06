@@ -848,8 +848,7 @@ function viewViolation(studentId) {
   openModal('violationModal');
 }
 
-// ─── PRINT FUNCTIONS ─────────────────────────────────────────────────────────
-// Helper: Convert HTML element to PDF using html2canvas + jsPDF directly
+// ─── HTML TO PDF (Core printing function) ────────────────────────────────────
 function htmlToPDF(element, filename, callback) {
   const { jsPDF } = window.jspdf;
   const pdf = new jsPDF('p', 'mm', 'a4');
@@ -858,38 +857,29 @@ function htmlToPDF(element, filename, callback) {
   const margin = 10;
   const contentWidth = pageWidth - margin * 2;
   
-  // Get all child elements of the container
   const children = element.children;
-  let currentPage = 0;
   let yPos = margin;
   
-  // Function to add a new page
   function addNewPage() {
     pdf.addPage();
-    currentPage++;
     yPos = margin;
   }
   
-  // Process each child element (each grade section)
-  const processChildren = async (index) => {
+  function processChildren(index) {
     if (index >= children.length) {
-      // All done, save PDF
       pdf.save(filename);
       if (callback) callback();
       return;
     }
     
     const child = children[index];
-    // Clone the child to avoid affecting the original DOM
     const clone = child.cloneNode(true);
-    // Set width to match contentWidth for proper scaling
     clone.style.width = contentWidth + 'mm';
     clone.style.padding = '0';
     clone.style.margin = '0';
     clone.style.direction = 'rtl';
     clone.style.fontFamily = 'Cairo, Times New Roman, serif';
     
-    // Create a temporary container for rendering
     const tempContainer = document.createElement('div');
     tempContainer.style.position = 'absolute';
     tempContainer.style.left = '-9999px';
@@ -899,103 +889,158 @@ function htmlToPDF(element, filename, callback) {
     tempContainer.appendChild(clone);
     document.body.appendChild(tempContainer);
     
-    try {
-      // Render the element with html2canvas
-      const canvas = await html2canvas(clone, {
-        scale: 2,
-        useCORS: true,
-        logging: false,
-        width: contentWidth * 3.78, // Convert mm to px (approx)
-        onclone: (doc) => {
-          // Ensure fonts are loaded
-        }
-      });
-      
-      // Remove temp container
+    html2canvas(clone, {
+      scale: 2,
+      useCORS: true,
+      logging: false,
+      width: contentWidth * 3.78,
+    }).then(canvas => {
       document.body.removeChild(tempContainer);
       
-      // Calculate the height of the content in mm
       const imgData = canvas.toDataURL('image/png');
       const imgWidth = contentWidth;
       const imgHeight = (canvas.height / canvas.width) * imgWidth;
       
-      // Check if content fits on current page
       if (yPos + imgHeight > pageHeight - margin) {
-        // Not enough space, add a new page
         addNewPage();
-        // If still doesn't fit, we need to split, but for simplicity we'll add to new page
-        if (yPos + imgHeight > pageHeight - margin) {
-          // Content is too tall for one page, we'll compress it a bit
-          const compressedHeight = pageHeight - margin - yPos - 5;
-          const scaleFactor = compressedHeight / imgHeight;
-          const newWidth = imgWidth * scaleFactor;
-          const newHeight = imgHeight * scaleFactor;
-          pdf.addImage(imgData, 'PNG', margin, yPos, newWidth, newHeight);
-          yPos += newHeight + 5;
-        } else {
-          pdf.addImage(imgData, 'PNG', margin, yPos, imgWidth, imgHeight);
-          yPos += imgHeight + 5;
-        }
-      } else {
-        pdf.addImage(imgData, 'PNG', margin, yPos, imgWidth, imgHeight);
-        yPos += imgHeight + 5;
       }
       
-      // Move to next child
+      // If still doesn't fit, scale it down to fit
+      let finalHeight = imgHeight;
+      let finalWidth = imgWidth;
+      if (yPos + imgHeight > pageHeight - margin) {
+        const scale = (pageHeight - margin - yPos - 5) / imgHeight;
+        finalHeight = imgHeight * scale;
+        finalWidth = imgWidth * scale;
+      }
+      
+      pdf.addImage(imgData, 'PNG', margin, yPos, finalWidth, finalHeight);
+      yPos += finalHeight + 5;
+      
       processChildren(index + 1);
-    } catch (err) {
+    }).catch(err => {
       console.error('Error processing child:', err);
       document.body.removeChild(tempContainer);
       processChildren(index + 1);
-    }
-  };
+    });
+  }
   
-  // Start processing children
   processChildren(0);
 }
 
-// ─── PRINT GRADE WARNINGS ────────────────────────────────────────────────────
-function printGradeWarnings() {
-  const data = buildWarningsByGrade();
-  if (!data.length) {
-    showToast('لا يوجد أي طالب عليه إنذار حالياً', 'error');
+// ─── PRINT VIOLATION ──────────────────────────────────────────────────────────
+function doPrint() {
+  const el = document.getElementById('violationContent');
+  if (!el || !el.innerHTML.trim()) {
+    showToast('لا يوجد محتوى للطباعة', 'error');
     return;
   }
   
-  // Build HTML content with all grade sections
   const container = document.createElement('div');
-  container.style.cssText = 'direction: rtl; font-family: "Cairo", "Times New Roman", serif; padding: 10px; background: white;';
-  data.forEach((g, i) => {
-    const section = document.createElement('div');
-    section.innerHTML = gradeWarningsSectionHTML(g, false);
-    section.style.marginBottom = '20px';
-    section.style.padding = '15px';
-    section.style.border = '1px solid #e2e8f0';
-    section.style.borderRadius = '8px';
-    section.style.background = 'white';
-    // Add page break for print (CSS will handle in browser print)
-    if (i < data.length - 1) {
-      section.style.pageBreakAfter = 'always';
-    }
-    container.appendChild(section);
-  });
+  container.style.cssText = 'direction: rtl; font-family: "Cairo", "Times New Roman", serif; padding: 20px; text-align: right; background: white; max-width: 780px; margin: 0 auto;';
+  container.innerHTML = el.innerHTML;
+  document.body.appendChild(container);
   
-  // For mobile: use html2canvas + jsPDF
   if (/Mobi|Android/i.test(navigator.userAgent)) {
-    // Show loading
     showToast('جاري تحضير ملف PDF...', 'success');
-    htmlToPDF(container, 'إنذارات_الطلاب_حسب_الصف.pdf', () => {
+    htmlToPDF(container, 'محضر_غياب.pdf', () => {
+      document.body.removeChild(container);
       showToast('تم حفظ ملف PDF ✅', 'success');
     });
   } else {
-    // Desktop: use browser print
     document.getElementById('printContainer').innerHTML = container.innerHTML;
+    document.body.removeChild(container);
     window.print();
     document.getElementById('printContainer').innerHTML = '';
   }
 }
 
-// ─── BUILD WARNINGS DATA ─────────────────────────────────────────────────────
+// ─── PRINT DAILY REPORT ──────────────────────────────────────────────────────
+function printDailyReport() {
+  const content = document.getElementById('dailyReportContent').innerHTML;
+  if (!content || content.trim() === '') {
+    showToast('لا يوجد محتوى للطباعة', 'error');
+    return;
+  }
+  const container = document.createElement('div');
+  container.style.cssText = 'direction:rtl;font-family:Cairo,sans-serif;padding:20px;text-align:right;background:white;';
+  container.innerHTML = content;
+  document.body.appendChild(container);
+  
+  if (/Mobi|Android/i.test(navigator.userAgent)) {
+    showToast('جاري تحضير ملف PDF...', 'success');
+    htmlToPDF(container, 'تقرير_غياب_يومي.pdf', () => {
+      document.body.removeChild(container);
+      showToast('تم حفظ ملف PDF ✅', 'success');
+    });
+  } else {
+    document.getElementById('printContainer').innerHTML = container.innerHTML;
+    document.body.removeChild(container);
+    window.print();
+    document.getElementById('printContainer').innerHTML = '';
+  }
+}
+
+// ─── PRINT TOTAL REPORT ──────────────────────────────────────────────────────
+function printTotalReport() {
+  let rows='', grandTotal=0, grandPresent=0, grandAbsent=0;
+  grades.forEach(g => {
+    let gt=0, ga=0;
+    (classes[g.id]||[]).forEach(cl => {
+      (students[cl.id]||[]).forEach(st => { gt++; if(st.absences.includes(TODAY)) ga++; });
+    });
+    const gp=gt-ga; grandTotal+=gt; grandPresent+=gp; grandAbsent+=ga;
+    rows+=`<tr><td>${g.label}</td><td>${gt}</td><td style="color:green;font-weight:700;">${gp}</td><td style="color:red;font-weight:700;">${ga}</td></tr>`;
+  });
+  const content = `<div style="font-family:'Times New Roman',serif;direction:rtl;padding:30px;color:#111;line-height:2;background:white;">
+    <div style="text-align:center;border-bottom:3px double #0f172a;padding-bottom:14px;margin-bottom:20px;">
+      <div style="font-size:11px;color:#555;">جمهورية مصر العربية<br>وزارة التربية والتعليم</div>
+      <h2 style="font-size:18px;font-weight:900;margin-top:8px;">تقرير إجمالي الحضور والغياب اليومي</h2>
+      <div style="font-size:11px;color:#777;margin-top:6px;">التاريخ: ${formatDateArabic(TODAY)}</div>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:14px;text-align:center;">
+      <thead><tr style="background:#f1f5f9;">
+        <th style="padding:10px;border:2px solid #0f172a;width:35%;">الصف</th>
+        <th style="padding:10px;border:2px solid #0f172a;">مقيد</th>
+        <th style="padding:10px;border:2px solid #0f172a;">حاضر</th>
+        <th style="padding:10px;border:2px solid #0f172a;">غائب</th>
+      </tr></thead>
+      <tbody>${rows}
+        <tr style="background:#f1f5f9;font-weight:900;font-size:15px;">
+          <td style="padding:10px;border:2px solid #0f172a;">الجملة</td>
+          <td style="padding:10px;border:2px solid #0f172a;">${grandTotal}</td>
+          <td style="padding:10px;border:2px solid #0f172a;color:green;">${grandPresent}</td>
+          <td style="padding:10px;border:2px solid #0f172a;color:red;">${grandAbsent}</td>
+        </tr>
+      </tbody>
+    </table>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-top:40px;border-top:1px solid #ccc;padding-top:20px;text-align:center;">
+      <div><div style="font-weight:700;margin-bottom:40px;font-size:12px;">سجل شئون الطلاب</div><div style="border-bottom:1px solid #555;width:80%;margin:0 auto 4px;"></div><div style="font-size:11px;color:#666;">التوقيع: .....................</div></div>
+      <div><div style="font-weight:700;margin-bottom:40px;font-size:12px;">الأخصائي الاجتماعي</div><div style="border-bottom:1px solid #555;width:80%;margin:0 auto 4px;"></div><div style="font-size:11px;color:#666;">التوقيع: .....................</div></div>
+      <div><div style="font-weight:700;margin-bottom:40px;font-size:12px;">يعتمد، مدير المدرسة</div><div style="border-bottom:1px solid #555;width:80%;margin:0 auto 4px;"></div><div style="font-size:11px;color:#666;">التوقيع والختم: .....................</div></div>
+    </div>
+  </div>`;
+  
+  const container = document.createElement('div');
+  container.style.cssText = 'direction:rtl;font-family:Cairo,sans-serif;padding:20px;text-align:right;background:white;';
+  container.innerHTML = content;
+  document.body.appendChild(container);
+  
+  if (/Mobi|Android/i.test(navigator.userAgent)) {
+    showToast('جاري تحضير ملف PDF...', 'success');
+    htmlToPDF(container, 'تقرير_اجمالي.pdf', () => {
+      document.body.removeChild(container);
+      showToast('تم حفظ ملف PDF ✅', 'success');
+    });
+  } else {
+    document.getElementById('printContainer').innerHTML = container.innerHTML;
+    document.body.removeChild(container);
+    window.print();
+    document.getElementById('printContainer').innerHTML = '';
+  }
+}
+
+// ─── GRADE WARNINGS ──────────────────────────────────────────────────────────
 function warnLevelName(level) {
   if (level === 1) return 'إنذار أول';
   if (level === 2) return 'إنذار ثانٍ';
@@ -1057,7 +1102,6 @@ function gradeWarningsSectionHTML(g, forPrint) {
     </div>`;
 }
 
-// ─── OPEN GRADE WARNINGS MODAL ──────────────────────────────────────────────
 function openGradeWarningsModal() {
   const data = buildWarningsByGrade();
   const container = document.getElementById('gradeWarningsContent');
@@ -1069,101 +1113,36 @@ function openGradeWarningsModal() {
   openModal('gradeWarningsModal');
 }
 
-// ─── OTHER PRINT FUNCTIONS (keep simple for now) ────────────────────────────
-function doPrint() {
-  const el = document.getElementById('violationContent');
-  if (/Mobi|Android/i.test(navigator.userAgent)) {
-    const container = document.createElement('div');
-    container.style.cssText = 'direction:rtl;font-family:Cairo,sans-serif;padding:20px;text-align:right;background:white;';
-    container.innerHTML = el.innerHTML;
-    document.body.appendChild(container);
-    htmlToPDF(container, 'محضر_غياب.pdf', () => {
-      document.body.removeChild(container);
-      showToast('تم حفظ ملف PDF ✅', 'success');
-    });
-  } else {
-    document.getElementById('printContainer').innerHTML = el.innerHTML;
-    window.print();
-    document.getElementById('printContainer').innerHTML = '';
-  }
-}
-
-function printDailyReport() {
-  const content = document.getElementById('dailyReportContent').innerHTML;
-  if (!content || content.trim() === '') {
-    showToast('لا يوجد محتوى للطباعة', 'error');
+function printGradeWarnings() {
+  const data = buildWarningsByGrade();
+  if (!data.length) {
+    showToast('لا يوجد أي طالب عليه إنذار حالياً', 'error');
     return;
   }
-  const container = document.createElement('div');
-  container.style.cssText = 'direction:rtl;font-family:Cairo,sans-serif;padding:20px;text-align:right;background:white;';
-  container.innerHTML = content;
-  document.body.appendChild(container);
   
-  if (/Mobi|Android/i.test(navigator.userAgent)) {
-    htmlToPDF(container, 'تقرير_غياب_يومي.pdf', () => {
-      document.body.removeChild(container);
-      showToast('تم حفظ ملف PDF ✅', 'success');
-    });
-  } else {
-    document.getElementById('printContainer').innerHTML = container.innerHTML;
-    document.body.removeChild(container);
-    window.print();
-    document.getElementById('printContainer').innerHTML = '';
-  }
-}
-
-function printTotalReport() {
-  let rows='', grandTotal=0, grandPresent=0, grandAbsent=0;
-  grades.forEach(g => {
-    let gt=0, ga=0;
-    (classes[g.id]||[]).forEach(cl => {
-      (students[cl.id]||[]).forEach(st => { gt++; if(st.absences.includes(TODAY)) ga++; });
-    });
-    const gp=gt-ga; grandTotal+=gt; grandPresent+=gp; grandAbsent+=ga;
-    rows+=`<tr><td>${g.label}</td><td>${gt}</td><td style="color:green;font-weight:700;">${gp}</td><td style="color:red;font-weight:700;">${ga}</td></tr>`;
+  const container = document.createElement('div');
+  container.style.cssText = 'direction: rtl; font-family: "Cairo", "Times New Roman", serif; padding: 10px; background: white;';
+  data.forEach((g, i) => {
+    const section = document.createElement('div');
+    section.innerHTML = gradeWarningsSectionHTML(g, false);
+    section.style.marginBottom = '20px';
+    section.style.padding = '15px';
+    section.style.border = '1px solid #e2e8f0';
+    section.style.borderRadius = '8px';
+    section.style.background = 'white';
+    if (i < data.length - 1) {
+      section.style.pageBreakAfter = 'always';
+    }
+    container.appendChild(section);
   });
-  const content = `<div style="font-family:'Times New Roman',serif;direction:rtl;padding:30px;color:#111;line-height:2;background:white;">
-    <div style="text-align:center;border-bottom:3px double #0f172a;padding-bottom:14px;margin-bottom:20px;">
-      <div style="font-size:11px;color:#555;">جمهورية مصر العربية<br>وزارة التربية والتعليم</div>
-      <h2 style="font-size:18px;font-weight:900;margin-top:8px;">تقرير إجمالي الحضور والغياب اليومي</h2>
-      <div style="font-size:11px;color:#777;margin-top:6px;">التاريخ: ${formatDateArabic(TODAY)}</div>
-    </div>
-    <table style="width:100%;border-collapse:collapse;font-size:14px;text-align:center;">
-      <thead><tr style="background:#f1f5f9;">
-        <th style="padding:10px;border:2px solid #0f172a;width:35%;">الصف</th>
-        <th style="padding:10px;border:2px solid #0f172a;">مقيد</th>
-        <th style="padding:10px;border:2px solid #0f172a;">حاضر</th>
-        <th style="padding:10px;border:2px solid #0f172a;">غائب</th>
-      </tr></thead>
-      <tbody>${rows}
-        <tr style="background:#f1f5f9;font-weight:900;font-size:15px;">
-          <td style="padding:10px;border:2px solid #0f172a;">الجملة</td>
-          <td style="padding:10px;border:2px solid #0f172a;">${grandTotal}</td>
-          <td style="padding:10px;border:2px solid #0f172a;color:green;">${grandPresent}</td>
-          <td style="padding:10px;border:2px solid #0f172a;color:red;">${grandAbsent}</td>
-        </tr>
-      </tbody>
-    </table>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-top:40px;border-top:1px solid #ccc;padding-top:20px;text-align:center;">
-      <div><div style="font-weight:700;margin-bottom:40px;font-size:12px;">سجل شئون الطلاب</div><div style="border-bottom:1px solid #555;width:80%;margin:0 auto 4px;"></div><div style="font-size:11px;color:#666;">التوقيع: .....................</div></div>
-      <div><div style="font-weight:700;margin-bottom:40px;font-size:12px;">الأخصائي الاجتماعي</div><div style="border-bottom:1px solid #555;width:80%;margin:0 auto 4px;"></div><div style="font-size:11px;color:#666;">التوقيع: .....................</div></div>
-      <div><div style="font-weight:700;margin-bottom:40px;font-size:12px;">يعتمد، مدير المدرسة</div><div style="border-bottom:1px solid #555;width:80%;margin:0 auto 4px;"></div><div style="font-size:11px;color:#666;">التوقيع والختم: .....................</div></div>
-    </div>
-  </div>`;
-  
-  const container = document.createElement('div');
-  container.style.cssText = 'direction:rtl;font-family:Cairo,sans-serif;padding:20px;text-align:right;background:white;';
-  container.innerHTML = content;
-  document.body.appendChild(container);
   
   if (/Mobi|Android/i.test(navigator.userAgent)) {
-    htmlToPDF(container, 'تقرير_اجمالي.pdf', () => {
-      document.body.removeChild(container);
+    showToast('جاري تحضير ملف PDF...', 'success');
+    htmlToPDF(container, 'إنذارات_الطلاب_حسب_الصف.pdf', () => {
       showToast('تم حفظ ملف PDF ✅', 'success');
     });
   } else {
     document.getElementById('printContainer').innerHTML = container.innerHTML;
-    document.body.removeChild(container);
     window.print();
     document.getElementById('printContainer').innerHTML = '';
   }

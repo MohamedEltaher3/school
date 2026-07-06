@@ -8,7 +8,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
 :root {
   --primary: #0f172a;
@@ -847,14 +848,239 @@ function viewViolation(studentId) {
   openModal('violationModal');
 }
 
-// ─── PRINT ────────────────────────────────────────────────────────────────────
+// ─── PRINT FUNCTIONS ─────────────────────────────────────────────────────────
+// Helper: Convert HTML element to PDF using html2canvas + jsPDF directly
+function htmlToPDF(element, filename, callback) {
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF('p', 'mm', 'a4');
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+  const margin = 10;
+  const contentWidth = pageWidth - margin * 2;
+  
+  // Get all child elements of the container
+  const children = element.children;
+  let currentPage = 0;
+  let yPos = margin;
+  
+  // Function to add a new page
+  function addNewPage() {
+    pdf.addPage();
+    currentPage++;
+    yPos = margin;
+  }
+  
+  // Process each child element (each grade section)
+  const processChildren = async (index) => {
+    if (index >= children.length) {
+      // All done, save PDF
+      pdf.save(filename);
+      if (callback) callback();
+      return;
+    }
+    
+    const child = children[index];
+    // Clone the child to avoid affecting the original DOM
+    const clone = child.cloneNode(true);
+    // Set width to match contentWidth for proper scaling
+    clone.style.width = contentWidth + 'mm';
+    clone.style.padding = '0';
+    clone.style.margin = '0';
+    clone.style.direction = 'rtl';
+    clone.style.fontFamily = 'Cairo, Times New Roman, serif';
+    
+    // Create a temporary container for rendering
+    const tempContainer = document.createElement('div');
+    tempContainer.style.position = 'absolute';
+    tempContainer.style.left = '-9999px';
+    tempContainer.style.top = '0';
+    tempContainer.style.width = contentWidth + 'mm';
+    tempContainer.style.direction = 'rtl';
+    tempContainer.appendChild(clone);
+    document.body.appendChild(tempContainer);
+    
+    try {
+      // Render the element with html2canvas
+      const canvas = await html2canvas(clone, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        width: contentWidth * 3.78, // Convert mm to px (approx)
+        onclone: (doc) => {
+          // Ensure fonts are loaded
+        }
+      });
+      
+      // Remove temp container
+      document.body.removeChild(tempContainer);
+      
+      // Calculate the height of the content in mm
+      const imgData = canvas.toDataURL('image/png');
+      const imgWidth = contentWidth;
+      const imgHeight = (canvas.height / canvas.width) * imgWidth;
+      
+      // Check if content fits on current page
+      if (yPos + imgHeight > pageHeight - margin) {
+        // Not enough space, add a new page
+        addNewPage();
+        // If still doesn't fit, we need to split, but for simplicity we'll add to new page
+        if (yPos + imgHeight > pageHeight - margin) {
+          // Content is too tall for one page, we'll compress it a bit
+          const compressedHeight = pageHeight - margin - yPos - 5;
+          const scaleFactor = compressedHeight / imgHeight;
+          const newWidth = imgWidth * scaleFactor;
+          const newHeight = imgHeight * scaleFactor;
+          pdf.addImage(imgData, 'PNG', margin, yPos, newWidth, newHeight);
+          yPos += newHeight + 5;
+        } else {
+          pdf.addImage(imgData, 'PNG', margin, yPos, imgWidth, imgHeight);
+          yPos += imgHeight + 5;
+        }
+      } else {
+        pdf.addImage(imgData, 'PNG', margin, yPos, imgWidth, imgHeight);
+        yPos += imgHeight + 5;
+      }
+      
+      // Move to next child
+      processChildren(index + 1);
+    } catch (err) {
+      console.error('Error processing child:', err);
+      document.body.removeChild(tempContainer);
+      processChildren(index + 1);
+    }
+  };
+  
+  // Start processing children
+  processChildren(0);
+}
+
+// ─── PRINT GRADE WARNINGS ────────────────────────────────────────────────────
+function printGradeWarnings() {
+  const data = buildWarningsByGrade();
+  if (!data.length) {
+    showToast('لا يوجد أي طالب عليه إنذار حالياً', 'error');
+    return;
+  }
+  
+  // Build HTML content with all grade sections
+  const container = document.createElement('div');
+  container.style.cssText = 'direction: rtl; font-family: "Cairo", "Times New Roman", serif; padding: 10px; background: white;';
+  data.forEach((g, i) => {
+    const section = document.createElement('div');
+    section.innerHTML = gradeWarningsSectionHTML(g, false);
+    section.style.marginBottom = '20px';
+    section.style.padding = '15px';
+    section.style.border = '1px solid #e2e8f0';
+    section.style.borderRadius = '8px';
+    section.style.background = 'white';
+    // Add page break for print (CSS will handle in browser print)
+    if (i < data.length - 1) {
+      section.style.pageBreakAfter = 'always';
+    }
+    container.appendChild(section);
+  });
+  
+  // For mobile: use html2canvas + jsPDF
+  if (/Mobi|Android/i.test(navigator.userAgent)) {
+    // Show loading
+    showToast('جاري تحضير ملف PDF...', 'success');
+    htmlToPDF(container, 'إنذارات_الطلاب_حسب_الصف.pdf', () => {
+      showToast('تم حفظ ملف PDF ✅', 'success');
+    });
+  } else {
+    // Desktop: use browser print
+    document.getElementById('printContainer').innerHTML = container.innerHTML;
+    window.print();
+    document.getElementById('printContainer').innerHTML = '';
+  }
+}
+
+// ─── BUILD WARNINGS DATA ─────────────────────────────────────────────────────
+function warnLevelName(level) {
+  if (level === 1) return 'إنذار أول';
+  if (level === 2) return 'إنذار ثانٍ';
+  return 'إنذار ثالث (فصل مؤقت)';
+}
+
+function buildWarningsByGrade() {
+  const result = [];
+  grades.forEach(g => {
+    let list = [];
+    (classes[g.id] || []).forEach(cl => {
+      (students[cl.id] || []).forEach(st => {
+        const warn = calcWarning(st.absences);
+        if (warn.level > 0) {
+          list.push({ name: st.name, className: cl.name, total: warn.total, consec: warn.consec, level: warn.level });
+        }
+      });
+    });
+    list.sort((a, b) => b.level - a.level || b.total - a.total);
+    if (list.length) result.push({ grade: g, students: list });
+  });
+  return result;
+}
+
+function gradeWarningsSectionHTML(g, forPrint) {
+  const rows = g.students.map((s, i) => `
+    <tr>
+      <td style="padding: 8px; border: 1px solid #cbd5e1; text-align: center;">${i + 1}</td>
+      <td style="padding: 8px; border: 1px solid #cbd5e1; font-weight: 700; text-align: right;">${s.name}</td>
+      <td style="padding: 8px; border: 1px solid #cbd5e1; text-align: center;">${s.className}</td>
+      <td style="padding: 8px; border: 1px solid #cbd5e1; text-align: center;">${s.total}</td>
+      <td style="padding: 8px; border: 1px solid #cbd5e1; text-align: center;">${s.consec}</td>
+      <td style="padding: 8px; border: 1px solid #cbd5e1; text-align: center; font-weight: 700; color: ${s.level === 3 ? '#991b1b' : s.level === 2 ? '#ea580c' : '#b45309'};">${warnLevelName(s.level)}</td>
+    </tr>`).join('');
+
+  return `
+    <div style="${forPrint ? '' : ''}">
+      <div class="vdoc-header">
+        <div class="ministry">جمهورية مصر العربية<br>وزارة التربية والتعليم<br>إدارة شئون الطلاب والامتحانات</div>
+        <h2 style="font-size: 20px; font-weight: 900;">كشف إنذارات الغياب – ${g.grade.label}</h2>
+        <div class="doc-num" style="font-size: 12px; color: #64748b; margin-top: 8px;">تاريخ الإصدار: ${formatDateArabic(TODAY)}</div>
+      </div>
+      <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+        <thead>
+          <tr style="background: #f1f5f9;">
+            <th style="padding: 8px; border: 1px solid #cbd5e1; width: 40px; text-align: center;">م</th>
+            <th style="padding: 8px; border: 1px solid #cbd5e1; text-align: right;">اسم الطالب</th>
+            <th style="padding: 8px; border: 1px solid #cbd5e1; width: 80px; text-align: center;">الفصل</th>
+            <th style="padding: 8px; border: 1px solid #cbd5e1; width: 100px; text-align: center;">إجمالي الغياب</th>
+            <th style="padding: 8px; border: 1px solid #cbd5e1; width: 100px; text-align: center;">الغياب المتصل</th>
+            <th style="padding: 8px; border: 1px solid #cbd5e1; width: 140px; text-align: center;">نوع الإنذار</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div style="margin-top: 14px; font-size: 12px; color: #64748b;">
+        إجمالي عدد الطلاب عليهم إنذار في هذا الصف: <strong>${g.students.length}</strong>
+      </div>
+    </div>`;
+}
+
+// ─── OPEN GRADE WARNINGS MODAL ──────────────────────────────────────────────
+function openGradeWarningsModal() {
+  const data = buildWarningsByGrade();
+  const container = document.getElementById('gradeWarningsContent');
+  if (!data.length) {
+    container.innerHTML = '<div class="empty-search">✅ لا يوجد أي طالب عليه إنذار حالياً</div>';
+  } else {
+    container.innerHTML = data.map((g) => gradeWarningsSectionHTML(g, false)).join('');
+  }
+  openModal('gradeWarningsModal');
+}
+
+// ─── OTHER PRINT FUNCTIONS (keep simple for now) ────────────────────────────
 function doPrint() {
   const el = document.getElementById('violationContent');
   if (/Mobi|Android/i.test(navigator.userAgent)) {
-    const w = document.createElement('div');
-    w.style.cssText = 'direction:rtl;font-family:Cairo,sans-serif;padding:20px;text-align:right;unicode-bidi:embed;';
-    w.innerHTML = el.innerHTML; document.body.appendChild(w);
-    html2pdf().set({ margin:10, filename:'محضر_غياب.pdf', html2canvas:{scale:2,useCORS:true}, jsPDF:{unit:'mm',format:'a4',orientation:'portrait'} }).from(w).save().then(()=>document.body.removeChild(w));
+    const container = document.createElement('div');
+    container.style.cssText = 'direction:rtl;font-family:Cairo,sans-serif;padding:20px;text-align:right;background:white;';
+    container.innerHTML = el.innerHTML;
+    document.body.appendChild(container);
+    htmlToPDF(container, 'محضر_غياب.pdf', () => {
+      document.body.removeChild(container);
+      showToast('تم حفظ ملف PDF ✅', 'success');
+    });
   } else {
     document.getElementById('printContainer').innerHTML = el.innerHTML;
     window.print();
@@ -868,16 +1094,19 @@ function printDailyReport() {
     showToast('لا يوجد محتوى للطباعة', 'error');
     return;
   }
-  const tempDiv = document.createElement('div');
-  tempDiv.style.cssText = 'direction:rtl;font-family:Cairo,sans-serif;padding:20px;text-align:right;unicode-bidi:embed;';
-  tempDiv.innerHTML = content;
-  document.body.appendChild(tempDiv);
+  const container = document.createElement('div');
+  container.style.cssText = 'direction:rtl;font-family:Cairo,sans-serif;padding:20px;text-align:right;background:white;';
+  container.innerHTML = content;
+  document.body.appendChild(container);
   
   if (/Mobi|Android/i.test(navigator.userAgent)) {
-    html2pdf().set({ margin: 10, filename: 'تقرير_غياب_يومي.pdf', html2canvas: { scale: 2, useCORS: true, allowTaint: true }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } }).from(tempDiv).save().then(() => document.body.removeChild(tempDiv));
+    htmlToPDF(container, 'تقرير_غياب_يومي.pdf', () => {
+      document.body.removeChild(container);
+      showToast('تم حفظ ملف PDF ✅', 'success');
+    });
   } else {
-    document.getElementById('printContainer').innerHTML = tempDiv.innerHTML;
-    document.body.removeChild(tempDiv);
+    document.getElementById('printContainer').innerHTML = container.innerHTML;
+    document.body.removeChild(container);
     window.print();
     document.getElementById('printContainer').innerHTML = '';
   }
@@ -893,7 +1122,7 @@ function printTotalReport() {
     const gp=gt-ga; grandTotal+=gt; grandPresent+=gp; grandAbsent+=ga;
     rows+=`<tr><td>${g.label}</td><td>${gt}</td><td style="color:green;font-weight:700;">${gp}</td><td style="color:red;font-weight:700;">${ga}</td></tr>`;
   });
-  const content = `<div style="font-family:'Times New Roman',serif;direction:rtl;padding:30px;color:#111;line-height:2;">
+  const content = `<div style="font-family:'Times New Roman',serif;direction:rtl;padding:30px;color:#111;line-height:2;background:white;">
     <div style="text-align:center;border-bottom:3px double #0f172a;padding-bottom:14px;margin-bottom:20px;">
       <div style="font-size:11px;color:#555;">جمهورية مصر العربية<br>وزارة التربية والتعليم</div>
       <h2 style="font-size:18px;font-weight:900;margin-top:8px;">تقرير إجمالي الحضور والغياب اليومي</h2>
@@ -922,16 +1151,19 @@ function printTotalReport() {
     </div>
   </div>`;
   
-  const tempDiv = document.createElement('div');
-  tempDiv.style.cssText = 'direction:rtl;font-family:Cairo,sans-serif;padding:20px;text-align:right;unicode-bidi:embed;';
-  tempDiv.innerHTML = content;
-  document.body.appendChild(tempDiv);
+  const container = document.createElement('div');
+  container.style.cssText = 'direction:rtl;font-family:Cairo,sans-serif;padding:20px;text-align:right;background:white;';
+  container.innerHTML = content;
+  document.body.appendChild(container);
   
   if (/Mobi|Android/i.test(navigator.userAgent)) {
-    html2pdf().set({ margin: 10, filename: 'تقرير_اجمالي.pdf', html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } }).from(tempDiv).save().then(() => document.body.removeChild(tempDiv));
+    htmlToPDF(container, 'تقرير_اجمالي.pdf', () => {
+      document.body.removeChild(container);
+      showToast('تم حفظ ملف PDF ✅', 'success');
+    });
   } else {
-    document.getElementById('printContainer').innerHTML = tempDiv.innerHTML;
-    document.body.removeChild(tempDiv);
+    document.getElementById('printContainer').innerHTML = container.innerHTML;
+    document.body.removeChild(container);
     window.print();
     document.getElementById('printContainer').innerHTML = '';
   }
@@ -1003,112 +1235,6 @@ function updateDailyReport() {
       <div><div style="font-weight:700;margin-bottom:35px;font-size:11px;">يعتمد، مدير المدرسة</div><div style="border-bottom:1px solid #64748b;width:70%;margin:0 auto 4px;"></div><div style="font-size:10px;color:#64748b;">التوقيع والختم: .....................</div></div>
     </div>
   </div>`;
-}
-
-// ─── GRADE WARNINGS (per-grade separated printout) ────────────────────────────
-function warnLevelName(level) {
-  if (level === 1) return 'إنذار أول';
-  if (level === 2) return 'إنذار ثانٍ';
-  return 'إنذار ثالث (فصل مؤقت)';
-}
-
-function buildWarningsByGrade() {
-  const result = [];
-  grades.forEach(g => {
-    let list = [];
-    (classes[g.id] || []).forEach(cl => {
-      (students[cl.id] || []).forEach(st => {
-        const warn = calcWarning(st.absences);
-        if (warn.level > 0) {
-          list.push({ name: st.name, className: cl.name, total: warn.total, consec: warn.consec, level: warn.level });
-        }
-      });
-    });
-    list.sort((a, b) => b.level - a.level || b.total - a.total);
-    if (list.length) result.push({ grade: g, students: list });
-  });
-  return result;
-}
-
-function gradeWarningsSectionHTML(g, forPrint) {
-  // Build the rows with proper Arabic text
-  const rows = g.students.map((s, i) => `
-    <tr>
-      <td style="padding: 8px; border: 1px solid #cbd5e1; text-align: center;">${i + 1}</td>
-      <td style="padding: 8px; border: 1px solid #cbd5e1; font-weight: 700; text-align: right;">${s.name}</td>
-      <td style="padding: 8px; border: 1px solid #cbd5e1; text-align: center;">${s.className}</td>
-      <td style="padding: 8px; border: 1px solid #cbd5e1; text-align: center;">${s.total}</td>
-      <td style="padding: 8px; border: 1px solid #cbd5e1; text-align: center;">${s.consec}</td>
-      <td style="padding: 8px; border: 1px solid #cbd5e1; text-align: center; font-weight: 700; color: ${s.level === 3 ? '#991b1b' : s.level === 2 ? '#ea580c' : '#b45309'};">${warnLevelName(s.level)}</td>
-    </tr>`).join('');
-
-  // Full HTML for a single grade's warning report
-  return `
-    <div class="${forPrint ? 'grade-warning-page' : ''}" style="${forPrint ? '' : 'margin-bottom: 24px;'}">
-      <div class="vdoc-header">
-        <div class="ministry">جمهورية مصر العربية<br>وزارة التربية والتعليم<br>إدارة شئون الطلاب والامتحانات</div>
-        <h2 style="font-size: 20px; font-weight: 900;">كشف إنذارات الغياب – ${g.grade.label}</h2>
-        <div class="doc-num" style="font-size: 12px; color: #64748b; margin-top: 8px;">تاريخ الإصدار: ${formatDateArabic(TODAY)}</div>
-      </div>
-      <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
-        <thead>
-          <tr style="background: #f1f5f9;">
-            <th style="padding: 8px; border: 1px solid #cbd5e1; width: 40px; text-align: center;">م</th>
-            <th style="padding: 8px; border: 1px solid #cbd5e1; text-align: right;">اسم الطالب</th>
-            <th style="padding: 8px; border: 1px solid #cbd5e1; width: 80px; text-align: center;">الفصل</th>
-            <th style="padding: 8px; border: 1px solid #cbd5e1; width: 100px; text-align: center;">إجمالي الغياب</th>
-            <th style="padding: 8px; border: 1px solid #cbd5e1; width: 100px; text-align: center;">الغياب المتصل</th>
-            <th style="padding: 8px; border: 1px solid #cbd5e1; width: 140px; text-align: center;">نوع الإنذار</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-      <div style="margin-top: 14px; font-size: 12px; color: #64748b;">
-        إجمالي عدد الطلاب عليهم إنذار في هذا الصف: <strong>${g.students.length}</strong>
-      </div>
-    </div>`;
-}
-
-function openGradeWarningsModal() {
-  const data = buildWarningsByGrade();
-  const container = document.getElementById('gradeWarningsContent');
-  if (!data.length) {
-    container.innerHTML = '<div class="empty-search">✅ لا يوجد أي طالب عليه إنذار حالياً</div>';
-  } else {
-    container.innerHTML = data.map((g) => gradeWarningsSectionHTML(g, false)).join('');
-  }
-  openModal('gradeWarningsModal');
-}
-
-function printGradeWarnings() {
-  const data = buildWarningsByGrade();
-  if (!data.length) { 
-    showToast('لا يوجد أي طالب عليه إنذار حالياً', 'error'); 
-    return; 
-  }
-  
-  // Build full HTML content with all grade sections, each with page-break class
-  const htmlContent = data.map((g, i) => gradeWarningsSectionHTML(g, true)).join('');
-  
-  const tempDiv = document.createElement('div');
-  tempDiv.style.cssText = 'direction: rtl; font-family: "Cairo", "Times New Roman", serif; padding: 20px; text-align: right; unicode-bidi: embed;';
-  tempDiv.innerHTML = htmlContent;
-  document.body.appendChild(tempDiv);
-  
-  if (/Mobi|Android/i.test(navigator.userAgent)) {
-    html2pdf().set({
-      margin: 10,
-      filename: 'إنذارات_الطلاب_حسب_الصف.pdf',
-      html2canvas: { scale: 2, useCORS: true },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-      pagebreak: { mode: ['css', 'legacy'] },
-    }).from(tempDiv).save().then(() => { document.body.removeChild(tempDiv); });
-  } else {
-    document.getElementById('printContainer').innerHTML = tempDiv.innerHTML;
-    document.body.removeChild(tempDiv);
-    window.print();
-    document.getElementById('printContainer').innerHTML = '';
-  }
 }
 
 // ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
@@ -1250,7 +1376,6 @@ async function deleteStudent(studentId, studentName, classId) {
   renderAdminClassList(); renderStudents(); updateSummaryCards(); updateHeader();
 }
 
-// Students tab
 function renderAdminGradeSelect2() {
   const c = document.getElementById('adminGradeSelect2');
   c.innerHTML = '';

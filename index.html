@@ -93,6 +93,8 @@ body { font-family: var(--font); background: #f1f5f9; color: #0f172a; min-height
 .btn-dark:hover { background: var(--primary-light); transform: translateY(-1px); }
 .btn-purple { background: #7c3aed; box-shadow: 0 4px 6px -1px rgba(124,58,237,0.2); }
 .btn-purple:hover { background: #6d28d9; transform: translateY(-1px); }
+.btn-red { background: var(--warning3); box-shadow: 0 4px 6px -1px rgba(153,27,27,0.2); }
+.btn-red:hover { background: #7f1d1d; transform: translateY(-1px); }
 
 /* SUMMARY CARDS */
 .summary-cards { display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
@@ -369,6 +371,7 @@ body { font-family: var(--font); background: #f1f5f9; color: #0f172a; min-height
     <button class="btn-action btn-green" id="btnMarkAll" onclick="markAllPresent()">✅ تسجيل حضور الكل</button>
     <button class="btn-action btn-dark" onclick="openDailyReportModal()">📊 تقرير الغياب اليومي</button>
     <button class="btn-action btn-purple" onclick="printTotalReport()">📋 تقرير إجمالي الكل</button>
+    <button class="btn-action btn-red" onclick="openGradeWarningsModal()">🚨 إنذارات الطلاب حسب الصف</button>
   </div>
   <div class="summary-cards">
     <div class="summary-card"><div class="card-icon" style="background:#e0f2fe;">👥</div><div><div class="card-label">طلاب الفصل</div><div class="card-value" id="sc-total">—</div></div></div>
@@ -434,6 +437,23 @@ body { font-family: var(--font); background: #f1f5f9; color: #0f172a; min-height
   </div>
 </div>
 
+<!-- GRADE WARNINGS MODAL -->
+<div class="modal-overlay" id="gradeWarningsModal">
+  <div class="modal violation-modal">
+    <div class="modal-header">
+      <h2>طباعة إنذارات الطلاب حسب الصف الدراسي</h2>
+      <div style="display:flex;gap:8px;">
+        <button class="btn-print-now" onclick="printGradeWarnings()">🖨️ طباعة</button>
+        <button class="btn-close" onclick="closeModal('gradeWarningsModal')">✕</button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:0.85rem;color:var(--gray);margin-bottom:16px;">كل صف دراسي هيتطبع في ورقة/صفحة منفصلة، وبيظهر فيها اسم الطالب وعدد أيام الغياب ونوع الإنذار (أول/ثانٍ/ثالث) مع التاريخ.</p>
+      <div id="gradeWarningsContent"></div>
+    </div>
+  </div>
+</div>
+
 <!-- ADMIN OVERLAY -->
 <div class="admin-overlay" id="adminOverlay">
   <div class="admin-panel">
@@ -487,11 +507,52 @@ body { font-family: var(--font); background: #f1f5f9; color: #0f172a; min-height
 <button class="scroll-top" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑</button>
 
 <script>
+// ─── GLOBAL ERROR SAFETY NET ───────────────────────────────────────────────────
+// Turns any uncaught error (even non-Error objects, which normally print as
+// "[object Object]") into a readable on-page message instead of a silent/blank failure.
+function describeError(e) {
+  if (!e) return 'خطأ غير معروف';
+  if (typeof e === 'string') return e;
+  if (e.message) return e.message;
+  try { return JSON.stringify(e); } catch (_) { return String(e); }
+}
+function showFatalError(title, detail) {
+  setLoading(false);
+  const el = document.getElementById('loadingOverlay');
+  el.classList.remove('hidden');
+  el.innerHTML = `
+    <div style="max-width:520px;text-align:center;padding:24px;">
+      <div style="font-size:2.5rem;margin-bottom:12px;">⚠️</div>
+      <div style="font-size:1.15rem;font-weight:800;margin-bottom:10px;">${title}</div>
+      <div style="font-size:0.9rem;opacity:0.85;line-height:1.8;white-space:pre-wrap;direction:ltr;text-align:left;background:rgba(255,255,255,0.08);padding:12px;border-radius:8px;">${detail}</div>
+    </div>`;
+}
+window.addEventListener('error', (ev) => {
+  console.error('Uncaught error:', ev.error || ev.message);
+});
+window.addEventListener('unhandledrejection', (ev) => {
+  console.error('Unhandled rejection:', ev.reason);
+});
+
 // ─── SUPABASE ─────────────────────────────────────────────────────────────────
 const SUPABASE_URL = 'https://nniqtxlhmpbfbdhkptcr.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_v-DbtD7WhodcY9UDHSuQCg_EP6XaAVM';
-const { createClient } = supabase;
-const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+let db = null;
+if (typeof supabase === 'undefined' || !supabase.createClient) {
+  showFatalError(
+    'تعذّر تحميل مكتبة Supabase',
+    'ملف "@supabase/supabase-js" لم يتم تحميله من الإنترنت.\n' +
+    'الأسباب الشائعة:\n' +
+    '- مفيش اتصال إنترنت وقت فتح الصفحة\n' +
+    '- إضافة Ad-Blocker أو جدار حماية بيمنع cdn.jsdelivr.net\n' +
+    '- بتفتح الملف جوه بيئة/معاينة معزولة عن الإنترنت\n\n' +
+    'الحل: افتح الملف في متصفح عادي (كروم/إيدج) وعندك اتصال إنترنت شغال، وجرّب تقفل الـ Ad-Blocker مؤقتاً.'
+  );
+} else {
+  const { createClient } = supabase;
+  db = createClient(SUPABASE_URL, SUPABASE_KEY);
+}
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 const ADMIN_PASSWORD = '123456';
@@ -931,6 +992,102 @@ function updateDailyReport() {
   </div>`;
 }
 
+// ─── GRADE WARNINGS (per-grade separated printout) ────────────────────────────
+function warnLevelName(level) {
+  if (level === 1) return 'إنذار أول';
+  if (level === 2) return 'إنذار ثانٍ';
+  return 'إنذار ثالث (فصل مؤقت)';
+}
+
+function buildWarningsByGrade() {
+  const result = [];
+  grades.forEach(g => {
+    let list = [];
+    (classes[g.id] || []).forEach(cl => {
+      (students[cl.id] || []).forEach(st => {
+        const warn = calcWarning(st.absences);
+        if (warn.level > 0) {
+          list.push({ name: st.name, className: cl.name, total: warn.total, consec: warn.consec, level: warn.level });
+        }
+      });
+    });
+    list.sort((a, b) => b.level - a.level || b.total - a.total);
+    if (list.length) result.push({ grade: g, students: list });
+  });
+  return result;
+}
+
+function gradeWarningsSectionHTML(g, forPrint) {
+  const rows = g.students.map((s, i) => `
+    <tr>
+      <td style="padding:8px;border:1px solid #cbd5e1;text-align:center;">${i + 1}</td>
+      <td style="padding:8px;border:1px solid #cbd5e1;font-weight:700;">${s.name}</td>
+      <td style="padding:8px;border:1px solid #cbd5e1;text-align:center;">${s.className}</td>
+      <td style="padding:8px;border:1px solid #cbd5e1;text-align:center;">${s.total}</td>
+      <td style="padding:8px;border:1px solid #cbd5e1;text-align:center;">${s.consec}</td>
+      <td style="padding:8px;border:1px solid #cbd5e1;text-align:center;font-weight:700;color:${s.level===3?'#991b1b':s.level===2?'#ea580c':'#b45309'};">${warnLevelName(s.level)}</td>
+    </tr>`).join('');
+
+  return `
+    <div${forPrint ? ' style="page-break-after: always;"' : ''}>
+      <div class="vdoc-header">
+        <div class="ministry">جمهورية مصر العربية<br>وزارة التربية والتعليم<br>إدارة شئون الطلاب والامتحانات</div>
+        <h2>كشف إنذارات الغياب — ${g.grade.label}</h2>
+        <div class="doc-num">تاريخ الإصدار: ${formatDateArabic(TODAY)}</div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:0.9rem;">
+        <thead><tr style="background:#f1f5f9;">
+          <th style="padding:8px;border:1px solid #cbd5e1;width:40px;">م</th>
+          <th style="padding:8px;border:1px solid #cbd5e1;">اسم الطالب</th>
+          <th style="padding:8px;border:1px solid #cbd5e1;width:80px;">الفصل</th>
+          <th style="padding:8px;border:1px solid #cbd5e1;width:100px;">إجمالي الغياب</th>
+          <th style="padding:8px;border:1px solid #cbd5e1;width:100px;">الغياب المتصل</th>
+          <th style="padding:8px;border:1px solid #cbd5e1;width:140px;">نوع الإنذار</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div style="margin-top:14px;font-size:12px;color:#64748b;">إجمالي عدد الطلاب عليهم إنذار في هذا الصف: <strong>${g.students.length}</strong></div>
+    </div>`;
+}
+
+function openGradeWarningsModal() {
+  const data = buildWarningsByGrade();
+  const container = document.getElementById('gradeWarningsContent');
+  if (!data.length) {
+    container.innerHTML = '<div class="empty-search">✅ لا يوجد أي طالب عليه إنذار حالياً</div>';
+  } else {
+    container.innerHTML = data.map((g, i) => `
+      <div class="violation-doc" style="border:1px solid #cbd5e1;border-radius:12px;padding:28px;background:white;box-shadow:none;${i < data.length - 1 ? 'margin-bottom:24px;' : ''}">
+        ${gradeWarningsSectionHTML(g, false)}
+      </div>`).join('');
+  }
+  openModal('gradeWarningsModal');
+}
+
+function printGradeWarnings() {
+  const data = buildWarningsByGrade();
+  if (!data.length) { showToast('لا يوجد أي طالب عليه إنذار حالياً', 'error'); return; }
+  const el = document.getElementById('printContainer');
+  el.innerHTML = data.map((g, i) => gradeWarningsSectionHTML(g, i < data.length - 1)).join('');
+
+  if (/Mobi|Android/i.test(navigator.userAgent)) {
+    const w = document.createElement('div');
+    w.style.cssText = 'direction:rtl;font-family:Cairo,sans-serif;padding:20px;text-align:right;unicode-bidi:embed;';
+    w.innerHTML = el.innerHTML;
+    document.body.appendChild(w);
+    html2pdf().set({
+      margin: 10,
+      filename: 'إنذارات_الطلاب_حسب_الصف.pdf',
+      html2canvas: { scale: 2, useCORS: true },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      pagebreak: { mode: ['css', 'legacy'] },
+    }).from(w).save().then(() => { document.body.removeChild(w); el.innerHTML = ''; });
+  } else {
+    window.print();
+    el.innerHTML = '';
+  }
+}
+
 // ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
 function openAdmin() {
   document.getElementById('adminOverlay').classList.add('show');
@@ -1131,6 +1288,9 @@ async function addNewStudent() {
 async function init() {
   document.getElementById('todayDate').textContent = formatDateArabic(TODAY);
   document.getElementById('viewDateInput').value = TODAY;
+
+  if (!db) return; // fatal error already shown by the Supabase load guard above
+
   setLoading(true, 'جاري تحميل البيانات...');
   try {
     await loadAll();
@@ -1140,9 +1300,8 @@ async function init() {
     setLoading(false);
     showToast('تم تحميل البيانات ✅');
   } catch(e) {
-    setLoading(false);
-    showToast('خطأ في الاتصال: '+e.message,'error');
-    console.error(e);
+    console.error('init() failed:', e);
+    showFatalError('تعذّر تحميل البيانات من قاعدة البيانات', describeError(e));
   }
 }
 

@@ -254,7 +254,7 @@ body { font-family: var(--font); background: #f1f5f9; color: #0f172a; min-height
 /* PRINT */
 @media print {
   body > *:not(#printContainer) { display: none !important; }
-  #printContainer { display: block !important; direction: rtl; font-family: 'Times New Roman', serif; padding: 30px; color: #111; line-height: 2; }
+  #printContainer { display: block !important; direction: rtl; font-family: 'Cairo', 'Times New Roman', serif; padding: 30px; color: #111; line-height: 2; }
   #printContainer .vdoc-header { text-align: center; border-bottom: 3px double #0f172a; padding-bottom: 14px; margin-bottom: 20px; }
   #printContainer .vdoc-header h2 { font-size: 18px; font-weight: 900; }
   #printContainer .vdoc-section h3 { font-size: 13px; font-weight: 800; background: #f1f5f9; padding: 5px 10px; border-right: 4px solid #0f172a; margin-bottom: 8px; }
@@ -266,9 +266,8 @@ body { font-family: var(--font); background: #f1f5f9; color: #0f172a; min-height
   #printContainer .sig-title { font-weight: 700; margin-bottom: 40px; font-size: 12px; }
   #printContainer .sig-line { border-bottom: 1px solid #555; width: 80%; margin: 0 auto 4px; }
   #printContainer table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  #printContainer td, #printContainer th { padding: 8px; border: 1px solid #cbd5e1; }
+  #printContainer td, #printContainer th { padding: 8px; border: 1px solid #cbd5e1; text-align: center; }
   #printContainer th { background: #f1f5f9; font-weight: 800; }
-  /* Page break for each grade warning section when printing */
   .grade-warning-page {
     page-break-after: always;
   }
@@ -851,13 +850,11 @@ function viewViolation(studentId) {
 // ─── PRINT ────────────────────────────────────────────────────────────────────
 function doPrint() {
   const el = document.getElementById('violationContent');
-  // For mobile, use html2pdf; for desktop, use browser print
   if (/Mobi|Android/i.test(navigator.userAgent)) {
     const w = document.createElement('div');
     w.style.cssText = 'direction:rtl;font-family:Cairo,sans-serif;padding:20px;text-align:right;unicode-bidi:embed;';
-    w.innerHTML = el.innerHTML;
-    document.body.appendChild(w);
-    html2pdf().set({ margin: 10, filename: 'محضر_غياب.pdf', html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } }).from(w).save().then(() => document.body.removeChild(w));
+    w.innerHTML = el.innerHTML; document.body.appendChild(w);
+    html2pdf().set({ margin:10, filename:'محضر_غياب.pdf', html2canvas:{scale:2,useCORS:true}, jsPDF:{unit:'mm',format:'a4',orientation:'portrait'} }).from(w).save().then(()=>document.body.removeChild(w));
   } else {
     document.getElementById('printContainer').innerHTML = el.innerHTML;
     window.print();
@@ -867,12 +864,10 @@ function doPrint() {
 
 function printDailyReport() {
   const content = document.getElementById('dailyReportContent').innerHTML;
-  // Ensure content exists
   if (!content || content.trim() === '') {
     showToast('لا يوجد محتوى للطباعة', 'error');
     return;
   }
-  // Create a temporary container with the report content
   const tempDiv = document.createElement('div');
   tempDiv.style.cssText = 'direction:rtl;font-family:Cairo,sans-serif;padding:20px;text-align:right;unicode-bidi:embed;';
   tempDiv.innerHTML = content;
@@ -1036,36 +1031,41 @@ function buildWarningsByGrade() {
 }
 
 function gradeWarningsSectionHTML(g, forPrint) {
+  // Build the rows with proper Arabic text
   const rows = g.students.map((s, i) => `
     <tr>
-      <td style="padding:8px;border:1px solid #cbd5e1;text-align:center;">${i + 1}</td>
-      <td style="padding:8px;border:1px solid #cbd5e1;font-weight:700;">${s.name}</td>
-      <td style="padding:8px;border:1px solid #cbd5e1;text-align:center;">${s.className}</td>
-      <td style="padding:8px;border:1px solid #cbd5e1;text-align:center;">${s.total}</td>
-      <td style="padding:8px;border:1px solid #cbd5e1;text-align:center;">${s.consec}</td>
-      <td style="padding:8px;border:1px solid #cbd5e1;text-align:center;font-weight:700;color:${s.level===3?'#991b1b':s.level===2?'#ea580c':'#b45309'};">${warnLevelName(s.level)}</td>
+      <td style="padding: 8px; border: 1px solid #cbd5e1; text-align: center;">${i + 1}</td>
+      <td style="padding: 8px; border: 1px solid #cbd5e1; font-weight: 700; text-align: right;">${s.name}</td>
+      <td style="padding: 8px; border: 1px solid #cbd5e1; text-align: center;">${s.className}</td>
+      <td style="padding: 8px; border: 1px solid #cbd5e1; text-align: center;">${s.total}</td>
+      <td style="padding: 8px; border: 1px solid #cbd5e1; text-align: center;">${s.consec}</td>
+      <td style="padding: 8px; border: 1px solid #cbd5e1; text-align: center; font-weight: 700; color: ${s.level === 3 ? '#991b1b' : s.level === 2 ? '#ea580c' : '#b45309'};">${warnLevelName(s.level)}</td>
     </tr>`).join('');
 
-  // Add page-break class for printing
+  // Full HTML for a single grade's warning report
   return `
-    <div class="${forPrint ? 'grade-warning-page' : ''}" style="${forPrint ? '' : 'margin-bottom:24px;'}">
+    <div class="${forPrint ? 'grade-warning-page' : ''}" style="${forPrint ? '' : 'margin-bottom: 24px;'}">
       <div class="vdoc-header">
         <div class="ministry">جمهورية مصر العربية<br>وزارة التربية والتعليم<br>إدارة شئون الطلاب والامتحانات</div>
-        <h2>كشف إنذارات الغياب — ${g.grade.label}</h2>
-        <div class="doc-num">تاريخ الإصدار: ${formatDateArabic(TODAY)}</div>
+        <h2 style="font-size: 20px; font-weight: 900;">كشف إنذارات الغياب – ${g.grade.label}</h2>
+        <div class="doc-num" style="font-size: 12px; color: #64748b; margin-top: 8px;">تاريخ الإصدار: ${formatDateArabic(TODAY)}</div>
       </div>
-      <table style="width:100%;border-collapse:collapse;font-size:0.9rem;">
-        <thead><tr style="background:#f1f5f9;">
-          <th style="padding:8px;border:1px solid #cbd5e1;width:40px;">م</th>
-          <th style="padding:8px;border:1px solid #cbd5e1;">اسم الطالب</th>
-          <th style="padding:8px;border:1px solid #cbd5e1;width:80px;">الفصل</th>
-          <th style="padding:8px;border:1px solid #cbd5e1;width:100px;">إجمالي الغياب</th>
-          <th style="padding:8px;border:1px solid #cbd5e1;width:100px;">الغياب المتصل</th>
-          <th style="padding:8px;border:1px solid #cbd5e1;width:140px;">نوع الإنذار</th>
-        </tr></thead>
+      <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+        <thead>
+          <tr style="background: #f1f5f9;">
+            <th style="padding: 8px; border: 1px solid #cbd5e1; width: 40px; text-align: center;">م</th>
+            <th style="padding: 8px; border: 1px solid #cbd5e1; text-align: right;">اسم الطالب</th>
+            <th style="padding: 8px; border: 1px solid #cbd5e1; width: 80px; text-align: center;">الفصل</th>
+            <th style="padding: 8px; border: 1px solid #cbd5e1; width: 100px; text-align: center;">إجمالي الغياب</th>
+            <th style="padding: 8px; border: 1px solid #cbd5e1; width: 100px; text-align: center;">الغياب المتصل</th>
+            <th style="padding: 8px; border: 1px solid #cbd5e1; width: 140px; text-align: center;">نوع الإنذار</th>
+          </tr>
+        </thead>
         <tbody>${rows}</tbody>
       </table>
-      <div style="margin-top:14px;font-size:12px;color:#64748b;">إجمالي عدد الطلاب عليهم إنذار في هذا الصف: <strong>${g.students.length}</strong></div>
+      <div style="margin-top: 14px; font-size: 12px; color: #64748b;">
+        إجمالي عدد الطلاب عليهم إنذار في هذا الصف: <strong>${g.students.length}</strong>
+      </div>
     </div>`;
 }
 
@@ -1082,13 +1082,16 @@ function openGradeWarningsModal() {
 
 function printGradeWarnings() {
   const data = buildWarningsByGrade();
-  if (!data.length) { showToast('لا يوجد أي طالب عليه إنذار حالياً', 'error'); return; }
+  if (!data.length) { 
+    showToast('لا يوجد أي طالب عليه إنذار حالياً', 'error'); 
+    return; 
+  }
   
   // Build full HTML content with all grade sections, each with page-break class
   const htmlContent = data.map((g, i) => gradeWarningsSectionHTML(g, true)).join('');
   
   const tempDiv = document.createElement('div');
-  tempDiv.style.cssText = 'direction:rtl;font-family:Cairo,sans-serif;padding:20px;text-align:right;unicode-bidi:embed;';
+  tempDiv.style.cssText = 'direction: rtl; font-family: "Cairo", "Times New Roman", serif; padding: 20px; text-align: right; unicode-bidi: embed;';
   tempDiv.innerHTML = htmlContent;
   document.body.appendChild(tempDiv);
   
